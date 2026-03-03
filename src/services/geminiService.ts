@@ -1,6 +1,17 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let aiInstance: GoogleGenAI | null = null;
+
+const getAI = () => {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("GEMINI_API_KEY is missing. Please set it in your environment variables.");
+    }
+    aiInstance = new GoogleGenAI({ apiKey: apiKey || "" });
+  }
+  return aiInstance;
+};
 
 export const models = {
   text: "gemini-3-flash-preview",
@@ -30,6 +41,7 @@ export const generateQuiz = async (
   subject?: string,
   examPeriod?: string
 ): Promise<Quiz> => {
+  const ai = getAI();
   let count = 10;
   let structurePrompt = "";
 
@@ -99,6 +111,7 @@ export const generateQuiz = async (
 };
 
 export const getQuestionHelp = async (question: string, helpType: 'hint' | 'method' | 'solution') => {
+  const ai = getAI();
   const promptMap = {
     hint: "Hãy đưa ra một gợi ý nhỏ để học sinh có thể tự suy nghĩ tiếp, không giải trực tiếp.",
     method: "Hãy hướng dẫn phương pháp giải, các bước tư duy cần thiết cho câu hỏi này.",
@@ -116,6 +129,7 @@ export const getQuestionHelp = async (question: string, helpType: 'hint' | 'meth
 };
 
 export const getExplanationStream = async (concept: string, subject: string = "Chung", imageBase64?: string) => {
+  const ai = getAI();
   const parts: any[] = [{ text: concept }];
   
   if (imageBase64) {
