@@ -49,6 +49,7 @@ export default function App() {
   const [generatedQuiz, setGeneratedQuiz] = useState<Quiz | null>(null);
   const [userAnswers, setUserAnswers] = useState<any[]>([]);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [activeHelp, setActiveHelp] = useState<{index: number, content: string, type: string} | null>(null);
   const [helpLoading, setHelpLoading] = useState<number | null>(null);
 
@@ -85,6 +86,7 @@ export default function App() {
   const handleGenerateQuiz = async () => {
     if (!quizTopic) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await generateQuiz(
         quizTopic, 
@@ -98,8 +100,9 @@ export default function App() {
       setUserAnswers(new Array(res.questions.length).fill(null));
       setQuizSubmitted(false);
       setActiveHelp(null);
-    } catch (error) {
-      console.error(error);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Có lỗi xảy ra khi tạo đề thi. Vui lòng kiểm tra lại API Key hoặc kết nối mạng.");
     } finally {
       setLoading(false);
     }
@@ -111,8 +114,9 @@ export default function App() {
     try {
       const content = await getQuestionHelp(generatedQuiz.questions[index].question, helpType);
       setActiveHelp({ index, content: content || '', type: helpType });
-    } catch (error) {
-      console.error(error);
+    } catch (err: any) {
+      console.error(err);
+      alert("AI không thể phản hồi lúc này. Vui lòng thử lại sau.");
     } finally {
       setHelpLoading(null);
     }
@@ -120,117 +124,136 @@ export default function App() {
 
   const downloadPDF = () => {
     if (!generatedQuiz) return;
-    const doc = new jsPDF();
-    
-    // Helper to clean LaTeX for PDF
-    const cleanText = (text: string) => {
-      return text.replace(/\$/g, '').replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, '$1/$2').replace(/\\sqrt\{([^}]*)\}/g, '√$1');
-    };
-
-    let y = 20;
-    doc.setFontSize(16);
-    const title = cleanText(generatedQuiz.title);
-    doc.text(title, 105, y, { align: 'center' });
-    y += 15;
-    
-    doc.setFontSize(11);
-    generatedQuiz.questions.forEach((q, i) => {
-      if (y > 270) {
-        doc.addPage();
-        y = 20;
-      }
+    try {
+      const doc = new jsPDF();
       
-      const questionText = `${i + 1}. ${cleanText(q.question)}`;
-      const splitQuestion = doc.splitTextToSize(questionText, 180);
-      doc.text(splitQuestion, 10, y);
-      y += splitQuestion.length * 7;
+      // Helper to clean LaTeX for PDF
+      const cleanText = (text: string) => {
+        return text.replace(/\$/g, '').replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, '$1/$2').replace(/\\sqrt\{([^}]*)\}/g, '√$1');
+      };
 
-      if (q.options) {
-        q.options.forEach((opt, j) => {
-          if (y > 280) {
-            doc.addPage();
-            y = 20;
-          }
-          const optText = `   ${String.fromCharCode(65 + j)}. ${cleanText(opt)}`;
-          const splitOpt = doc.splitTextToSize(optText, 170);
-          doc.text(splitOpt, 15, y);
-          y += splitOpt.length * 6;
-        });
-      }
-      y += 5;
-    });
+      let y = 20;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      const title = cleanText(generatedQuiz.title);
+      doc.text(title, 105, y, { align: 'center' });
+      y += 15;
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      generatedQuiz.questions.forEach((q, i) => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+        
+        const questionText = `${i + 1}. ${cleanText(q.question)}`;
+        const splitQuestion = doc.splitTextToSize(questionText, 180);
+        doc.text(splitQuestion, 10, y);
+        y += splitQuestion.length * 7;
 
-    // Add Answer Key
-    doc.addPage();
-    y = 20;
-    doc.setFontSize(14);
-    doc.text("ĐÁP ÁN VÀ GIẢI THÍCH", 105, y, { align: 'center' });
-    y += 15;
-    doc.setFontSize(10);
-    generatedQuiz.questions.forEach((q, i) => {
-      if (y > 270) {
-        doc.addPage();
-        y = 20;
-      }
-      const ansText = `${i + 1}. Đáp án: ${q.correctAnswer || 'Tự luận'}`;
-      doc.text(ansText, 10, y);
-      y += 6;
-      const expText = `Giải thích: ${cleanText(q.explanation)}`;
-      const splitExp = doc.splitTextToSize(expText, 180);
-      doc.text(splitExp, 10, y);
-      y += splitExp.length * 5 + 5;
-    });
+        if (q.options) {
+          q.options.forEach((opt, j) => {
+            if (y > 280) {
+              doc.addPage();
+              y = 20;
+            }
+            const optText = `   ${String.fromCharCode(65 + j)}. ${cleanText(opt)}`;
+            const splitOpt = doc.splitTextToSize(optText, 170);
+            doc.text(splitOpt, 15, y);
+            y += splitOpt.length * 6;
+          });
+        }
+        y += 5;
+      });
 
-    doc.save(`${generatedQuiz.title.replace(/\s+/g, '_')}.pdf`);
+      // Add Answer Key
+      doc.addPage();
+      y = 20;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("DAP AN VA GIAI THICH", 105, y, { align: 'center' });
+      y += 15;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      generatedQuiz.questions.forEach((q, i) => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+        const ans = q.correctAnswer !== null ? (typeof q.correctAnswer === 'number' ? String.fromCharCode(65 + q.correctAnswer) : q.correctAnswer) : 'Tu luan';
+        const ansText = `${i + 1}. Dap an: ${ans}`;
+        doc.text(ansText, 10, y);
+        y += 6;
+        const expText = `Giai thich: ${cleanText(q.explanation)}`;
+        const splitExp = doc.splitTextToSize(expText, 180);
+        doc.text(splitExp, 10, y);
+        y += splitExp.length * 5 + 5;
+      });
+
+      doc.save(`${generatedQuiz.title.replace(/\s+/g, '_')}.pdf`);
+    } catch (err) {
+      console.error("PDF Error:", err);
+      alert("Lỗi khi tạo PDF. Vui lòng thử tải bản DOCX.");
+    }
   };
 
   const downloadDOC = async () => {
     if (!generatedQuiz) return;
-    
-    const cleanText = (text: string) => {
-      return text.replace(/\$/g, '');
-    };
+    try {
+      const cleanText = (text: string) => {
+        return text.replace(/\$/g, '');
+      };
 
-    const doc = new Document({
-      sections: [{
-        properties: {},
-        children: [
-          new Paragraph({
-            children: [new TextRun({ text: generatedQuiz.title, bold: true, size: 32 })],
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 400 }
-          }),
-          ...generatedQuiz.questions.flatMap((q, i) => [
+      const doc = new Document({
+        sections: [{
+          properties: {},
+          children: [
             new Paragraph({
-              children: [new TextRun({ text: `${i + 1}. ${cleanText(q.question)}`, bold: true, size: 24 })],
-              spacing: { before: 200, after: 100 },
+              children: [new TextRun({ text: generatedQuiz.title, bold: true, size: 32 })],
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 400 }
             }),
-            ...(q.options || []).map((opt, j) => new Paragraph({
-              children: [new TextRun({ text: `${String.fromCharCode(65 + j)}. ${cleanText(opt)}`, size: 22 })],
-              indent: { left: 720 },
-              spacing: { after: 50 }
-            }))
-          ]),
-          new Paragraph({
-            children: [new TextRun({ text: "ĐÁP ÁN VÀ GIẢI THÍCH", bold: true, size: 28, break: 2 })],
-            alignment: AlignmentType.CENTER,
-            spacing: { before: 400, after: 200 }
-          }),
-          ...generatedQuiz.questions.flatMap((q, i) => [
+            ...generatedQuiz.questions.flatMap((q, i) => [
+              new Paragraph({
+                children: [new TextRun({ text: `${i + 1}. ${cleanText(q.question)}`, bold: true, size: 24 })],
+                spacing: { before: 200, after: 100 },
+              }),
+              ...(q.options || []).map((opt, j) => new Paragraph({
+                children: [new TextRun({ text: `${String.fromCharCode(65 + j)}. ${cleanText(opt)}`, size: 22 })],
+                indent: { left: 720 },
+                spacing: { after: 50 }
+              }))
+            ]),
             new Paragraph({
-              children: [
-                new TextRun({ text: `${i + 1}. Đáp án: ${q.correctAnswer || 'Tự luận'}`, bold: true, size: 22 }),
-                new TextRun({ text: `\nGiải thích: ${cleanText(q.explanation)}`, size: 20, italics: true })
-              ],
-              spacing: { before: 100 }
-            })
-          ])
-        ],
-      }],
-    });
+              children: [new TextRun({ text: "ĐÁP ÁN VÀ GIẢI THÍCH", bold: true, size: 28, break: 2 })],
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 400, after: 200 }
+            }),
+            ...generatedQuiz.questions.flatMap((q, i) => [
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `${i + 1}. Đáp án: ${q.correctAnswer !== null ? (typeof q.correctAnswer === 'number' ? String.fromCharCode(65 + q.correctAnswer) : q.correctAnswer) : 'Tự luận'}`, bold: true, size: 22 }),
+                ],
+                spacing: { before: 100 }
+              }),
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `Giải thích: ${cleanText(q.explanation)}`, size: 20, italics: true })
+                ],
+                spacing: { after: 200 }
+              })
+            ])
+          ],
+        }],
+      });
 
-    const blob = await Packer.toBlob(doc);
-    saveAs(blob, `${generatedQuiz.title.replace(/\s+/g, '_')}.docx`);
+      const blob = await Packer.toBlob(doc);
+      saveAs(blob, `${generatedQuiz.title.replace(/\s+/g, '_')}.docx`);
+    } catch (err) {
+      console.error("DOCX Error:", err);
+      alert("Lỗi khi tạo file DOCX. Vui lòng thử lại.");
+    }
   };
 
   const handleTutorQuery = async () => {
@@ -371,6 +394,12 @@ export default function App() {
                 <h2 className="text-3xl font-bold text-slate-900 mb-2">Tạo đề thi chuẩn</h2>
                 <p className="text-slate-500">Hệ thống AI sẽ tạo đề thi bám sát chương trình giáo dục Việt Nam.</p>
               </div>
+
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-medium">
+                  {error}
+                </div>
+              )}
 
               <div className="space-y-6">
                 <div className="space-y-2">

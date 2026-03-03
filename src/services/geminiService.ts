@@ -5,10 +5,10 @@ let aiInstance: GoogleGenAI | null = null;
 const getAI = () => {
   if (!aiInstance) {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("GEMINI_API_KEY is missing. Please set it in your environment variables.");
+    if (!apiKey || apiKey === "undefined") {
+      throw new Error("Thiếu GEMINI_API_KEY. Vui lòng thiết lập API Key trong phần cài đặt (Environment Variables) để sử dụng tính năng AI.");
     }
-    aiInstance = new GoogleGenAI({ apiKey: apiKey || "" });
+    aiInstance = new GoogleGenAI({ apiKey });
   }
   return aiInstance;
 };
@@ -79,7 +79,7 @@ export const generateQuiz = async (
        - type: "multiple-choice" | "true-false" | "short-answer" | "essay"
        - question: nội dung câu hỏi (sử dụng LaTeX nếu có công thức)
        - options: mảng các lựa chọn (chỉ dành cho multiple-choice và true-false, sử dụng LaTeX nếu có công thức)
-       - correctAnswer: đáp án đúng (index cho multiple-choice/true-false, string cho short-answer, null cho essay)
+       - correctAnswer: đáp án đúng (BẮT BUỘC: trả về index 0, 1, 2... dưới dạng chuỗi cho multiple-choice/true-false; trả về nội dung đáp án cho short-answer; trả về null cho essay)
        - explanation: lời giải chi tiết (sử dụng LaTeX nếu có công thức)`,
     config: {
       responseMimeType: "application/json",
