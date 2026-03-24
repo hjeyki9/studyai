@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   GraduationCap, 
   MessageSquare, 
@@ -15,12 +15,15 @@ import {
   Download,
   Lightbulb,
   HelpCircle,
-  BookOpen
+  BookOpen,
+  Trophy,
+  AlertCircle
 } from 'lucide-react';
 import { 
   generateQuiz, 
   getExplanationStream, 
   getQuestionHelp,
+  getQuizFeedback,
   Quiz, 
   QuizQuestion 
 } from './services/geminiService';
@@ -46,9 +49,16 @@ export default function App() {
   const [quizGrade, setQuizGrade] = useState('12');
   const [quizSubject, setQuizSubject] = useState('Toán');
   const [quizExamPeriod, setQuizExamPeriod] = useState('Giữa kì 1');
+  const [quizQuestionCount, setQuizQuestionCount] = useState(10);
+  const [quizTimeLimit, setQuizTimeLimit] = useState(15);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [generatedQuiz, setGeneratedQuiz] = useState<Quiz | null>(null);
   const [userAnswers, setUserAnswers] = useState<any[]>([]);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
+  const [quizScore, setQuizScore] = useState(0);
+  const [quizFeedback, setQuizFeedback] = useState<string | null>(null);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeHelp, setActiveHelp] = useState<{index: number, content: string, type: string} | null>(null);
   const [helpLoading, setHelpLoading] = useState<number | null>(null);
@@ -56,9 +66,10 @@ export default function App() {
   // Tutor State
   const [tutorQuery, setTutorQuery] = useState('');
   const [tutorImage, setTutorImage] = useState<string | null>(null);
-  const [selectedSubject, setSelectedSubject] = useState('Chung');
+  const [selectedSubject, setSelectedSubject] = useState('Toán');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', content: string}[]>([]);
   const chatContainerRef = React.useRef<HTMLDivElement>(null);
+  const quizResultRef = React.useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   const handleScroll = () => {
@@ -81,10 +92,61 @@ export default function App() {
     scrollToBottom();
   }, [chatHistory]);
 
-  const subjects = ['Chung', 'Toán', 'Văn', 'Anh', 'Lý', 'Hóa', 'Địa', 'Sinh', 'Sử'];
+  React.useEffect(() => {
+    let timer: any;
+    if (isTimerRunning && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+      }, 1000);
+    } else if (timeLeft === 0 && isTimerRunning) {
+      handleQuizSubmit();
+    }
+    return () => clearInterval(timer);
+  }, [isTimerRunning, timeLeft]);
+
+  const handleQuizSubmit = async () => {
+    if (!generatedQuiz) return;
+    
+    setIsTimerRunning(false);
+    setQuizSubmitted(true);
+    
+    // Scroll to top of results
+    setTimeout(() => {
+      quizResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+    
+    // Calculate score
+    let correct = 0;
+    generatedQuiz.questions.forEach((q, i) => {
+      if (String(q.correctAnswer) === String(userAnswers[i])) {
+        correct++;
+      }
+    });
+    const score = (correct / generatedQuiz.questions.length) * 10;
+    setQuizScore(score);
+    
+    // Get feedback
+    setFeedbackLoading(true);
+    try {
+      const feedback = await getQuizFeedback(generatedQuiz, userAnswers);
+      setQuizFeedback(feedback || "Không có nhận xét.");
+    } catch (err) {
+      console.error(err);
+      setQuizFeedback("Không thể lấy nhận xét từ AI lúc này.");
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const subjects = ['Toán', 'Văn', 'Anh', 'Lý', 'Hóa', 'Địa', 'Sinh', 'Sử'];
 
   const handleGenerateQuiz = async () => {
-    if (!quizTopic) return;
     setLoading(true);
     setError(null);
     try {
@@ -92,14 +154,32 @@ export default function App() {
         quizTopic, 
         quizType, 
         quizDifficulty,
-        quizType === 'Đề thi' ? quizGrade : undefined,
-        quizType === 'Đề thi' ? quizSubject : undefined,
-        quizType === 'Đề thi' ? quizExamPeriod : undefined
+        quizGrade,
+        quizSubject,
+        quizType === 'Đề thi' ? quizExamPeriod : undefined,
+        quizType === 'Kiểm tra kiến thức' ? quizQuestionCount : undefined
       );
+
+      let timeInSeconds = 0;
+      if (quizType === 'Kiểm tra kiến thức') {
+        timeInSeconds = quizTimeLimit * 60;
+      } else {
+        // Standard exam time based on subject
+        if (['Toán', 'Văn'].includes(quizSubject)) {
+          timeInSeconds = 90 * 60;
+        } else {
+          timeInSeconds = 45 * 60;
+        }
+      }
+
       setGeneratedQuiz(res);
       setUserAnswers(new Array(res.questions.length).fill(null));
       setQuizSubmitted(false);
+      setQuizScore(0);
+      setQuizFeedback(null);
       setActiveHelp(null);
+      setTimeLeft(timeInSeconds);
+      setIsTimerRunning(true);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Có lỗi xảy ra khi tạo đề thi. Vui lòng kiểm tra lại API Key hoặc kết nối mạng.");
@@ -270,7 +350,6 @@ export default function App() {
     try {
       const stream = await getExplanationStream(
         query || 'Hãy phân tích hình ảnh này và giải thích các kiến thức liên quan.', 
-        selectedSubject,
         image || undefined
       );
       
@@ -306,44 +385,57 @@ export default function App() {
   };
 
   const renderDashboard = () => (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-12 py-8">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col md:flex-row md:items-center justify-between gap-4"
+      >
         <div>
-          <h1 className="text-4xl text-slate-900 mb-2 font-display">Chào mừng bạn!</h1>
-          <p className="text-slate-500">Hôm nay bạn muốn học gì?</p>
+          <h1 className="text-5xl text-slate-900 mb-3 font-display font-bold tracking-tight">Chào mừng bạn!</h1>
+          <p className="text-slate-500 text-lg">Hôm nay bạn muốn học gì? Hãy để AI đồng hành cùng bạn.</p>
         </div>
-      </div>
+      </motion.div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {[
           { 
             id: 'quiz', 
             title: 'Luyện tập & Kiểm tra', 
             desc: 'Tạo đề thi trắc nghiệm thông minh với nhiều cấp độ khó.', 
             icon: <FileText className="text-emerald-500" />,
-            color: 'bg-emerald-50'
+            color: 'bg-emerald-50',
+            hoverColor: 'hover:border-emerald-200'
           },
           { 
             id: 'tutor', 
             title: 'Trợ lý học tập', 
             desc: 'Giải đáp thắc mắc và phân tích hình ảnh bài tập.', 
             icon: <MessageSquare className="text-purple-500" />,
-            color: 'bg-purple-50'
+            color: 'bg-purple-50',
+            hoverColor: 'hover:border-purple-200'
           }
-        ].map((item) => (
+        ].map((item, index) => (
           <motion.button
             key={item.id}
-            whileHover={{ y: -4 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.1 }}
+            whileHover={{ y: -8, scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => setCurrentView(item.id as View)}
-            className="flex flex-col items-start p-8 rounded-3xl bg-white border border-slate-100 shadow-sm text-left transition-all hover:shadow-md group"
+            className={cn(
+              "flex flex-col items-start p-10 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm text-left transition-all hover:shadow-xl group cursor-pointer",
+              item.hoverColor
+            )}
           >
-            <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110", item.color)}>
-              {React.cloneElement(item.icon as React.ReactElement<any>, { size: 28 })}
+            <div className={cn("w-16 h-16 rounded-2xl flex items-center justify-center mb-8 transition-transform group-hover:rotate-6", item.color)}>
+              {React.cloneElement(item.icon as React.ReactElement<any>, { size: 32 })}
             </div>
-            <h3 className="text-2xl mb-3">{item.title}</h3>
-            <p className="text-slate-500 mb-6">{item.desc}</p>
-            <div className="mt-auto flex items-center text-slate-400 text-sm font-medium group-hover:text-slate-900 transition-colors">
-              Bắt đầu ngay <ChevronRight size={16} className="ml-1" />
+            <h3 className="text-3xl font-bold mb-4 text-slate-900">{item.title}</h3>
+            <p className="text-slate-500 text-lg mb-8 leading-relaxed">{item.desc}</p>
+            <div className="mt-auto flex items-center text-slate-400 text-sm font-bold group-hover:text-slate-900 transition-colors uppercase tracking-widest">
+              Bắt đầu ngay <ChevronRight size={18} className="ml-2" />
             </div>
           </motion.button>
         ))}
@@ -385,115 +477,200 @@ export default function App() {
 
       <div className="flex-1 overflow-y-auto bg-[#F8F9FB]">
         {!generatedQuiz ? (
-          <div className="max-w-2xl mx-auto py-12 px-4">
-            <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm space-y-8">
+          <div className="max-w-4xl mx-auto py-12 px-4">
+            <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-xl space-y-12">
               <div className="text-center">
-                <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-3">
-                  <FileText size={40} className="-rotate-3" />
-                </div>
-                <h2 className="text-3xl font-bold text-slate-900 mb-2">Tạo đề thi chuẩn</h2>
-                <p className="text-slate-500">Hệ thống AI sẽ tạo đề thi bám sát chương trình giáo dục Việt Nam.</p>
+                <h2 className="text-4xl font-display font-bold text-slate-900 mb-3">Thiết lập đề thi</h2>
+                <p className="text-slate-500 text-lg">Chọn các mục dưới đây để AI tạo đề thi phù hợp nhất cho bạn.</p>
               </div>
 
               {error && (
-                <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-medium">
+                <div className="p-6 bg-red-50 border border-red-100 rounded-3xl text-red-600 font-medium flex items-center gap-3">
+                  <X className="flex-shrink-0" />
                   {error}
                 </div>
               )}
 
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-slate-700 ml-1 uppercase tracking-wider">Chủ đề hoặc Môn học</label>
-                  <input 
-                    type="text" 
-                    placeholder="VD: Giải tích 12, Hóa học hữu cơ, Tiếng Anh tốt nghiệp..."
-                    className="w-full px-6 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-slate-50"
-                    value={quizTopic}
-                    onChange={(e) => setQuizTopic(e.target.value)}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-700 ml-1 uppercase tracking-wider">Loại đề thi</label>
-                    <select 
-                      className="w-full px-6 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-slate-50"
-                      value={quizType}
-                      onChange={(e) => setQuizType(e.target.value)}
-                    >
-                      <option>Kiểm tra kiến thức</option>
-                      <option>Đề thi</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-700 ml-1 uppercase tracking-wider">Độ khó</label>
-                    <select 
-                      className="w-full px-6 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-slate-50"
-                      value={quizDifficulty}
-                      onChange={(e) => setQuizDifficulty(e.target.value)}
-                    >
-                      <option>Dễ</option>
-                      <option>Trung bình</option>
-                      <option>Khó</option>
-                      <option>Chuyên gia</option>
-                    </select>
+              <div className="space-y-12">
+                {/* Step 1: Type */}
+                <div className="space-y-4">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">1. Loại hình học tập</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      { id: 'Kiểm tra kiến thức', label: 'Kiểm tra nhanh', desc: 'Thử thách nhanh, củng cố kiến thức tức thì', icon: <BookOpen />, color: 'emerald' },
+                      { id: 'Đề thi', label: 'Đề thi chuẩn', desc: 'Đề thi chính thức, sát thực tế BGD&ĐT', icon: <GraduationCap />, color: 'blue' }
+                    ].map(t => (
+                      <motion.button
+                        key={t.id}
+                        whileHover={{ scale: 1.02, y: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => setQuizType(t.id)}
+                        className={cn(
+                          "flex items-center gap-5 p-6 rounded-3xl border-2 transition-all text-left group cursor-pointer",
+                          quizType === t.id 
+                            ? t.color === 'emerald' ? "bg-emerald-50 border-emerald-500 shadow-lg shadow-emerald-100" : "bg-blue-50 border-blue-500 shadow-lg shadow-blue-100"
+                            : "bg-white border-slate-100 hover:border-slate-200 shadow-sm"
+                        )}
+                      >
+                        <div className={cn(
+                          "w-14 h-14 rounded-2xl flex items-center justify-center transition-colors",
+                          quizType === t.id 
+                            ? t.color === 'emerald' ? "bg-emerald-500 text-white" : "bg-blue-500 text-white"
+                            : "bg-slate-50 text-slate-400 group-hover:bg-slate-100"
+                        )}>
+                          {React.cloneElement(t.icon as React.ReactElement<any>, { size: 28 })}
+                        </div>
+                        <div>
+                          <div className={cn("font-bold text-lg", quizType === t.id ? (t.color === 'emerald' ? "text-emerald-900" : "text-blue-900") : "text-slate-700")}>{t.label}</div>
+                          <div className="text-sm text-slate-400">{t.desc}</div>
+                        </div>
+                      </motion.button>
+                    ))}
                   </div>
                 </div>
 
+                {/* Step 2: Subject */}
+                <div className="space-y-4">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">2. Môn học</label>
+                  <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-3">
+                    {subjects.map(s => (
+                      <motion.button
+                        key={s}
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => setQuizSubject(s)}
+                        className={cn(
+                          "py-4 rounded-2xl border-2 font-bold transition-all text-sm cursor-pointer shadow-sm",
+                          quizSubject === s 
+                            ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-200" 
+                            : "bg-white border-slate-100 text-slate-600 hover:border-emerald-200"
+                        )}
+                      >
+                        {s}
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Step 3: Grade */}
+                <div className="space-y-4">
+                  <label className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">3. Khối lớp</label>
+                  <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => (
+                      <motion.button
+                        key={g}
+                        whileHover={{ scale: 1.1, y: -2 }}
+                        whileTap={{ scale: 0.9 }}
+                        onClick={() => setQuizGrade(String(g))}
+                        className={cn(
+                          "py-3 rounded-xl border-2 font-bold transition-all text-sm cursor-pointer shadow-sm",
+                          quizGrade === String(g) 
+                            ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-100" 
+                            : "bg-white border-slate-100 text-slate-600 hover:border-emerald-200"
+                        )}
+                      >
+                        {g}
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Step 4: Period (if Exam) */}
                 {quizType === 'Đề thi' && (
                   <motion.div 
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-4"
                   >
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-700 ml-1 uppercase tracking-wider">Môn học</label>
-                      <select 
-                        className="w-full px-6 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-slate-50"
-                        value={quizSubject}
-                        onChange={(e) => setQuizSubject(e.target.value)}
-                      >
-                        {subjects.filter(s => s !== 'Chung').map(s => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-700 ml-1 uppercase tracking-wider">Lớp</label>
-                      <select 
-                        className="w-full px-6 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-slate-50"
-                        value={quizGrade}
-                        onChange={(e) => setQuizGrade(e.target.value)}
-                      >
-                        {Array.from({ length: 12 }, (_, i) => i + 1).map(g => (
-                          <option key={g} value={g}>Lớp {g}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-700 ml-1 uppercase tracking-wider">Kỳ thi</label>
-                      <select 
-                        className="w-full px-6 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-slate-50"
-                        value={quizExamPeriod}
-                        onChange={(e) => setQuizExamPeriod(e.target.value)}
-                      >
-                        <option>Giữa kì 1</option>
-                        <option>Cuối kì 1</option>
-                        <option>Giữa kì 2</option>
-                        <option>Cuối kì 2</option>
-                        <option>Thi tốt nghiệp THPT</option>
-                      </select>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">4. Kỳ thi</label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {['Giữa kì 1', 'Cuối kì 1', 'Giữa kì 2', 'Cuối kì 2'].map(p => (
+                        <motion.button
+                          key={p}
+                          whileHover={{ scale: 1.05, y: -2 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => setQuizExamPeriod(p)}
+                          className={cn(
+                            "py-4 px-2 rounded-2xl border-2 font-bold transition-all text-xs text-center cursor-pointer shadow-sm",
+                            quizExamPeriod === p 
+                              ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-100" 
+                              : "bg-white border-slate-100 text-slate-600 hover:border-emerald-200"
+                          )}
+                        >
+                          {p}
+                        </motion.button>
+                      ))}
                     </div>
                   </motion.div>
                 )}
 
+                {/* Step 5: Optional Details / Quick Check Config */}
+                {quizType === 'Kiểm tra kiến thức' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t border-slate-50">
+                    <div className="space-y-3">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Chủ đề cụ thể</label>
+                      <input 
+                        type="text" 
+                        placeholder="VD: Hàm số bậc hai, Hóa hữu cơ..."
+                        className="w-full px-6 py-5 rounded-3xl border-2 border-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all bg-slate-50 text-lg"
+                        value={quizTopic}
+                        onChange={(e) => setQuizTopic(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-3">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Số câu & Thời gian</label>
+                      <div className="flex gap-3">
+                        <select 
+                          value={quizQuestionCount}
+                          onChange={(e) => setQuizQuestionCount(Number(e.target.value))}
+                          className="flex-1 px-4 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50 font-bold text-slate-700"
+                        >
+                          {[5, 10, 15, 20, 25, 30, 40, 50].map(c => (
+                            <option key={c} value={c}>{c} câu</option>
+                          ))}
+                        </select>
+                        <select 
+                          value={quizTimeLimit}
+                          onChange={(e) => setQuizTimeLimit(Number(e.target.value))}
+                          className="flex-1 px-4 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50 font-bold text-slate-700"
+                        >
+                          {[15, 30, 45, 90].map(t => (
+                            <option key={t} value={t}>{t} phút</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="col-span-1 md:col-span-2 space-y-3">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1 text-center block">Mức độ thử thách</label>
+                      <div className="flex bg-slate-100 p-1.5 rounded-[2rem] max-w-2xl mx-auto w-full">
+                        {['Dễ', 'Trung bình', 'Khó', 'Chuyên gia'].map(d => (
+                          <motion.button
+                            key={d}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => setQuizDifficulty(d)}
+                            className={cn(
+                              "flex-1 py-3 rounded-[1.5rem] text-sm font-bold transition-all cursor-pointer",
+                              quizDifficulty === d 
+                                ? "bg-white text-emerald-600 shadow-sm" 
+                                : "text-slate-500 hover:text-slate-700"
+                            )}
+                          >
+                            {d}
+                          </motion.button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <button 
                   onClick={handleGenerateQuiz}
-                  disabled={loading || !quizTopic}
-                  className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-3 shadow-lg shadow-emerald-100 text-lg"
+                  disabled={loading}
+                  className="w-full py-6 bg-emerald-600 text-white rounded-[2rem] font-bold hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-4 shadow-xl shadow-emerald-100 text-xl mt-12 cursor-pointer"
                 >
-                  {loading ? <Loader2 className="animate-spin" /> : <Plus size={24} />}
-                  Bắt đầu tạo đề
+                  {loading ? <Loader2 className="animate-spin" /> : <Plus size={28} />}
+                  Bắt đầu tạo đề ngay
                 </button>
               </div>
             </div>
@@ -501,18 +678,98 @@ export default function App() {
         ) : (
           <div className="max-w-4xl mx-auto py-8 px-4">
             <motion.div 
+              ref={quizResultRef}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="space-y-8"
             >
+              {quizSubmitted && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="grid grid-cols-1 md:grid-cols-3 gap-6"
+                >
+                  <div className="md:col-span-1 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-100 flex flex-col items-center justify-center text-center space-y-4">
+                    <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center relative">
+                      <Trophy size={48} className="text-emerald-500" />
+                      <motion.div 
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        className="absolute -top-2 -right-2 bg-emerald-500 text-white text-xs font-black px-3 py-1.5 rounded-full shadow-lg"
+                      >
+                        SCORE
+                      </motion.div>
+                    </div>
+                    <div>
+                      <div className="text-6xl font-black text-slate-900 tracking-tighter">
+                        {quizScore.toFixed(1)}
+                      </div>
+                      <div className="text-slate-400 font-bold uppercase tracking-widest text-xs mt-1">Thang điểm 10</div>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${quizScore * 10}%` }}
+                        className="h-full bg-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2 bg-gradient-to-br from-indigo-600 to-purple-700 p-8 rounded-[2.5rem] text-white shadow-xl shadow-indigo-100 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+                      <MessageSquare size={120} />
+                    </div>
+                    <div className="relative z-10 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-white/20 rounded-xl backdrop-blur-md">
+                          <AlertCircle size={20} />
+                        </div>
+                        <h3 className="text-xl font-bold">Nhận xét từ EduAI</h3>
+                      </div>
+                      
+                      {feedbackLoading ? (
+                        <div className="flex items-center gap-3 py-4">
+                          <Loader2 className="animate-spin" />
+                          <span className="font-medium opacity-80">AI đang phân tích kết quả của bạn...</span>
+                        </div>
+                      ) : (
+                        <div className="markdown-body markdown-light text-indigo-50 leading-relaxed max-h-[200px] overflow-y-auto pr-4 custom-scrollbar">
+                          <Markdown>{quizFeedback || "Đang tải nhận xét..."}</Markdown>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
               <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
                 <div className="flex justify-between items-center mb-10 pb-6 border-b border-slate-100">
                   <div>
                     <h2 className="text-3xl font-bold text-slate-900">{generatedQuiz.title}</h2>
-                    <p className="text-slate-400 mt-1 font-medium">Thời gian làm bài: 90 phút (dự kiến)</p>
+                    <div className="flex items-center gap-4 mt-2">
+                      <p className="text-slate-400 font-medium">Thời gian còn lại:</p>
+                      <div className={cn(
+                        "px-4 py-1.5 rounded-xl font-mono font-bold text-lg",
+                        timeLeft < 60 ? "bg-red-50 text-red-600 animate-pulse" : "bg-slate-100 text-slate-700"
+                      )}>
+                        {formatTime(timeLeft)}
+                      </div>
+                    </div>
                   </div>
-                  <div className="px-6 py-3 bg-emerald-50 text-emerald-600 rounded-2xl font-bold border border-emerald-100">
-                    {quizSubmitted ? 'Đã hoàn thành' : 'Đang thực hiện'}
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="px-6 py-3 bg-emerald-50 text-emerald-600 rounded-2xl font-bold border border-emerald-100">
+                      {quizSubmitted ? 'Đã hoàn thành' : 'Đang thực hiện'}
+                    </div>
+                    {quizSubmitted && (
+                      <button 
+                        onClick={() => {
+                          setGeneratedQuiz(null);
+                          setIsTimerRunning(false);
+                        }}
+                        className="text-sm text-slate-400 hover:text-emerald-600 font-bold flex items-center gap-1"
+                      >
+                        <ArrowLeft size={14} /> Làm đề khác
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -545,20 +802,6 @@ export default function App() {
                             title="Gợi ý"
                           >
                             <Lightbulb size={20} />
-                          </button>
-                          <button 
-                            onClick={() => handleGetHelp(i, 'method')}
-                            className="p-2.5 text-blue-500 hover:bg-blue-50 rounded-xl transition-colors"
-                            title="Cách giải"
-                          >
-                            <HelpCircle size={20} />
-                          </button>
-                          <button 
-                            onClick={() => handleGetHelp(i, 'solution')}
-                            className="p-2.5 text-purple-500 hover:bg-purple-50 rounded-xl transition-colors"
-                            title="Giải chi tiết"
-                          >
-                            <BookOpen size={20} />
                           </button>
                         </div>
                       </div>
@@ -606,7 +849,7 @@ export default function App() {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {q.options?.map((opt, j) => {
                               const isSelected = userAnswers[i] === j;
-                              const isCorrect = Number(q.correctAnswer) === j;
+                              const isCorrect = String(q.correctAnswer) === String(j);
                               const showResult = quizSubmitted;
                               
                               return (
@@ -696,8 +939,8 @@ export default function App() {
                 <div className="mt-16 pt-10 border-t border-slate-100">
                   {!quizSubmitted ? (
                     <button 
-                      onClick={() => setQuizSubmitted(true)}
-                      className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 text-xl"
+                      onClick={handleQuizSubmit}
+                      className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-emerald-100 text-xl cursor-pointer"
                     >
                       Hoàn thành & Nộp bài
                     </button>
@@ -705,13 +948,13 @@ export default function App() {
                     <div className="flex gap-4">
                       <button 
                         onClick={() => setGeneratedQuiz(null)}
-                        className="flex-1 py-5 bg-slate-900 text-white rounded-2xl font-bold hover:bg-black transition-all text-xl"
+                        className="flex-1 py-5 bg-slate-900 text-white rounded-2xl font-bold hover:bg-black hover:scale-[1.02] active:scale-[0.98] transition-all text-xl cursor-pointer"
                       >
                         Làm đề mới
                       </button>
                       <button 
                         onClick={() => setCurrentView('dashboard')}
-                        className="flex-1 py-5 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl font-bold hover:bg-slate-50 transition-all text-xl"
+                        className="flex-1 py-5 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl font-bold hover:bg-slate-50 hover:scale-[1.02] active:scale-[0.98] transition-all text-xl cursor-pointer"
                       >
                         Về trang chủ
                       </button>
@@ -727,51 +970,30 @@ export default function App() {
   );
 
   const renderTutor = () => (
-    <div className="fixed inset-0 z-[60] bg-white flex flex-col">
-      {/* Gauth-style Header */}
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-white">
-        <div className="flex items-center gap-3">
-          <button 
+    <div className="fixed inset-0 z-[60] bg-[#F0F2F5] flex flex-col">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white/80 backdrop-blur-lg sticky top-0 z-10">
+        <div className="flex items-center gap-4">
+          <motion.button 
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
             onClick={() => setCurrentView('dashboard')}
-            className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+            className="p-2.5 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
           >
             <ArrowLeft size={24} className="text-slate-600" />
-          </button>
+          </motion.button>
           <div>
-            <h3 className="font-bold text-slate-900 text-lg">Trợ lý học tập</h3>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">AI Trực tuyến</span>
+            <h3 className="font-bold text-slate-900 text-xl tracking-tight">Trợ lý học tập thông minh</h3>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <span className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">AI Powered • Online</span>
             </div>
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
-          <div className="flex bg-slate-100 p-1 rounded-xl">
-            {subjects.slice(0, 4).map(sub => (
-              <button
-                key={sub}
-                onClick={() => setSelectedSubject(sub)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                  selectedSubject === sub 
-                    ? "bg-white text-purple-600 shadow-sm" 
-                    : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                {sub}
-              </button>
-            ))}
-            <select 
-              className="bg-transparent text-xs font-bold text-slate-500 px-2 outline-none"
-              value={subjects.includes(selectedSubject) && subjects.indexOf(selectedSubject) > 3 ? selectedSubject : ""}
-              onChange={(e) => e.target.value && setSelectedSubject(e.target.value)}
-            >
-              <option value="" disabled>Thêm...</option>
-              {subjects.slice(4).map(sub => (
-                <option key={sub} value={sub}>{sub}</option>
-              ))}
-            </select>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-purple-50 text-purple-600 rounded-2xl font-bold text-xs border border-purple-100">
+            <Search size={14} /> AI Powered
           </div>
         </div>
       </div>
@@ -780,87 +1002,128 @@ export default function App() {
       <div 
         ref={chatContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 space-y-6 bg-[#F8F9FB]"
+        className="flex-1 overflow-y-auto p-6 space-y-8 bg-gradient-to-b from-[#F8F9FB] to-[#F0F2F5]"
       >
         {chatHistory.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-center space-y-6">
-            <div className="w-24 h-24 bg-purple-50 rounded-3xl flex items-center justify-center rotate-12">
-              <MessageSquare size={48} className="text-purple-500 -rotate-12" />
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="h-full flex flex-col items-center justify-center text-center space-y-8"
+          >
+            <div className="relative">
+              <div className="absolute inset-0 bg-purple-400 blur-3xl opacity-20 animate-pulse" />
+              <div className="w-32 h-32 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-[2.5rem] flex items-center justify-center rotate-12 shadow-2xl relative z-10">
+                <MessageSquare size={64} className="text-white -rotate-12" />
+              </div>
             </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-slate-900">EduAI có thể giúp gì?</h2>
-              <p className="text-slate-500 max-w-[280px] mx-auto text-sm">
-                Chụp ảnh bài tập hoặc nhập câu hỏi để nhận lời giải chi tiết ngay lập tức.
+            <div className="space-y-3 max-w-md">
+              <h2 className="text-4xl font-bold text-slate-900 tracking-tight">EduAI có thể giúp gì?</h2>
+              <p className="text-slate-500 text-lg leading-relaxed">
+                Chụp ảnh bài tập hoặc nhập câu hỏi. AI sẽ tự động nhận diện môn học và đưa ra lời giải chi tiết.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3 w-full max-w-sm px-4">
-              {['Giải toán hình', 'Viết đoạn văn', 'Dịch tiếng Anh', 'Giải hóa học'].map((hint) => (
-                <button 
-                  key={hint}
-                  onClick={() => setTutorQuery(hint)}
-                  className="p-3 bg-white border border-slate-100 rounded-2xl text-xs font-medium text-slate-600 hover:border-purple-200 hover:text-purple-600 transition-all text-left"
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl px-4">
+              {[
+                { text: 'Giải toán hình học lớp 12', icon: '📐' },
+                { text: 'Viết đoạn văn nghị luận xã hội', icon: '✍️' },
+                { text: 'Dịch và giải thích ngữ pháp Anh', icon: '🇬🇧' },
+                { text: 'Cân bằng phương trình hóa học', icon: '🧪' }
+              ].map((hint, idx) => (
+                <motion.button 
+                  key={hint.text}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.1 }}
+                  whileHover={{ scale: 1.05, y: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setTutorQuery(hint.text)}
+                  className="p-5 bg-white border border-slate-100 rounded-[1.5rem] text-sm font-bold text-slate-700 hover:border-purple-300 hover:text-purple-600 transition-all text-left shadow-sm hover:shadow-md flex items-center gap-3 cursor-pointer"
                 >
-                  {hint}
-                </button>
+                  <span className="text-xl">{hint.icon}</span>
+                  {hint.text}
+                </motion.button>
               ))}
             </div>
-          </div>
+          </motion.div>
         )}
 
         {chatHistory.map((msg, i) => (
-          <div key={i} className={cn("flex w-full", msg.role === 'user' ? "justify-end" : "justify-start")}>
+          <motion.div 
+            key={i} 
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className={cn("flex w-full", msg.role === 'user' ? "justify-end" : "justify-start")}
+          >
             <div className={cn(
-              "max-w-[90%] md:max-w-[75%] p-4 rounded-2xl shadow-sm",
+              "max-w-[90%] md:max-w-[80%] p-6 rounded-[2rem] shadow-sm relative group",
               msg.role === 'user' 
-                ? "bg-purple-600 text-white rounded-tr-none" 
-                : "bg-white text-slate-800 rounded-tl-none border border-slate-100"
+                ? "bg-gradient-to-br from-purple-600 to-indigo-700 text-white rounded-tr-none shadow-purple-200" 
+                : "bg-white text-slate-800 rounded-tl-none border border-slate-100 shadow-slate-200"
             )}>
-              <div className="markdown-body text-[15px] leading-relaxed">
+              <div className="markdown-body text-[16px] leading-relaxed">
                 <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                   {msg.content}
                 </Markdown>
               </div>
+              <div className={cn(
+                "absolute bottom-2 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity font-bold uppercase tracking-widest",
+                msg.role === 'user' ? "right-4 text-purple-200" : "left-4 text-slate-300"
+              )}>
+                {msg.role === 'user' ? 'Bạn' : 'EduAI Assistant'}
+              </div>
             </div>
-          </div>
+          </motion.div>
         ))}
 
         {loading && chatHistory[chatHistory.length - 1]?.role === 'user' && (
-          <div className="flex justify-start">
-            <div className="bg-white border border-slate-100 p-4 rounded-2xl rounded-tl-none flex items-center gap-3 shadow-sm">
-              <div className="flex gap-1">
-                <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" />
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex justify-start"
+          >
+            <div className="bg-white border border-slate-100 p-6 rounded-[2rem] rounded-tl-none flex items-center gap-4 shadow-sm">
+              <div className="flex gap-1.5">
+                <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" />
               </div>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">AI đang suy nghĩ...</span>
             </div>
-          </div>
+          </motion.div>
         )}
       </div>
 
-      {/* Input Area - Gauth Style */}
-      <div className="p-4 bg-white border-t border-slate-100 pb-8">
+      {/* Input Area */}
+      <div className="p-6 bg-white border-t border-slate-200 pb-10 shadow-[0_-4px_20px_rgba(0,0,0,0.03)]">
         <div className="max-w-4xl mx-auto">
-          {tutorImage && (
-            <div className="mb-3 relative inline-block">
-              <img src={tutorImage} alt="Preview" className="h-20 w-20 object-cover rounded-xl border border-slate-200" />
-              <button 
-                onClick={() => setTutorImage(null)}
-                className="absolute -top-2 -right-2 bg-slate-900 text-white rounded-full p-1 shadow-lg"
+          <AnimatePresence>
+            {tutorImage && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="mb-4 relative inline-block"
               >
-                <X size={12} />
-              </button>
-            </div>
-          )}
+                <img src={tutorImage} alt="Preview" className="h-24 w-24 object-cover rounded-2xl border-2 border-purple-100 shadow-lg" />
+                <button 
+                  onClick={() => setTutorImage(null)}
+                  className="absolute -top-3 -right-3 bg-slate-900 text-white rounded-full p-1.5 shadow-xl hover:scale-110 transition-transform cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
           
-          <div className="relative flex items-center gap-2 bg-[#F3F4F6] rounded-3xl p-2 pl-4">
-            <label className="p-2 text-slate-500 hover:text-purple-600 transition-colors cursor-pointer">
-              <Plus size={24} />
+          <div className="relative flex items-center gap-3 bg-[#F3F4F6] rounded-[2.5rem] p-3 pl-6 border-2 border-transparent focus-within:border-purple-200 focus-within:bg-white transition-all shadow-inner">
+            <label className="p-3 text-slate-400 hover:text-purple-600 transition-colors cursor-pointer hover:scale-110 active:scale-95">
+              <Plus size={28} />
               <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
             </label>
             
             <textarea 
               placeholder="Hỏi EduAI bất cứ điều gì..."
-              className="flex-1 bg-transparent py-2 px-2 focus:outline-none text-slate-800 resize-none max-h-32 min-h-[40px]"
+              className="flex-1 bg-transparent py-3 px-2 focus:outline-none text-slate-800 resize-none max-h-40 min-h-[48px] text-lg font-medium"
               rows={1}
               value={tutorQuery}
               onChange={(e) => {
@@ -876,18 +1139,20 @@ export default function App() {
               }}
             />
             
-            <button 
+            <motion.button 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={handleTutorQuery}
               disabled={loading || (!tutorQuery && !tutorImage)}
               className={cn(
-                "p-2.5 rounded-full transition-all shadow-md",
+                "p-4 rounded-full transition-all shadow-lg flex items-center justify-center cursor-pointer",
                 loading || (!tutorQuery && !tutorImage) 
-                  ? "bg-slate-300 text-white" 
-                  : "bg-purple-600 text-white hover:scale-105 active:scale-95"
+                  ? "bg-slate-200 text-slate-400" 
+                  : "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-purple-200"
               )}
             >
-              <Send size={20} />
-            </button>
+              {loading ? <Loader2 className="animate-spin" size={24} /> : <Send size={24} />}
+            </motion.button>
           </div>
         </div>
       </div>
@@ -905,7 +1170,9 @@ export default function App() {
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <div 
+            <motion.div 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               className="flex items-center gap-2 cursor-pointer" 
               onClick={() => setCurrentView('dashboard')}
             >
@@ -913,31 +1180,16 @@ export default function App() {
                 <GraduationCap size={24} />
               </div>
               <span className="text-xl font-display font-bold text-slate-900">EduAI</span>
-            </div>
+            </motion.div>
             
             <div className="hidden md:flex items-center gap-8">
-              <button 
-                onClick={() => setCurrentView('dashboard')}
-                className={cn("text-sm font-semibold transition-colors", currentView === 'dashboard' ? "text-emerald-600" : "text-slate-500 hover:text-slate-900")}
-              >
-                Tổng quan
-              </button>
-              <button 
-                onClick={() => setCurrentView('quiz')}
-                className={cn("text-sm font-semibold transition-colors", currentView === 'quiz' ? "text-emerald-600" : "text-slate-500 hover:text-slate-900")}
-              >
-                Kiểm tra
-              </button>
-              <button 
-                onClick={() => setCurrentView('tutor')}
-                className={cn("text-sm font-semibold transition-colors", currentView === 'tutor' ? "text-emerald-600" : "text-slate-500 hover:text-slate-900")}
-              >
-                Trợ lý
-              </button>
+              <div className="px-6 py-2 bg-emerald-50 text-emerald-600 rounded-full text-sm font-black uppercase tracking-[0.2em] border border-emerald-100">
+                Study with AI
+              </div>
             </div>
 
             <div className="flex items-center gap-4">
-              <button className="p-2 text-slate-400 hover:text-slate-900 transition-colors">
+              <button className="p-2 text-slate-400 hover:text-slate-900 transition-colors cursor-pointer">
                 <Search size={20} />
               </button>
             </div>

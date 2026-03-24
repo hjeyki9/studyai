@@ -39,19 +39,21 @@ export const generateQuiz = async (
   difficulty: string = "Trung bình",
   grade?: string,
   subject?: string,
-  examPeriod?: string
+  examPeriod?: string,
+  customCount?: number
 ): Promise<Quiz> => {
   const ai = getAI();
-  let count = 10;
+  let count = customCount || 10;
   let structurePrompt = "";
+  const effectiveTopic = topic || `Kiến thức tổng hợp môn ${subject} lớp ${grade}${examPeriod ? ` (${examPeriod})` : ""}`;
 
   if (type === "Kiểm tra kiến thức") {
-    count = 25;
-    structurePrompt = `Tạo bộ đề trắc nghiệm chọn đáp án (multiple-choice) kiểm tra kiến thức tổng quát cho chủ đề "${topic}" theo chương trình giáo dục phổ thông Việt Nam.`;
+    if (!customCount) count = 25;
+    structurePrompt = `Tạo bộ đề trắc nghiệm chọn đáp án (multiple-choice) kiểm tra kiến thức tổng quát cho chủ đề "${effectiveTopic}" theo chương trình giáo dục phổ thông Việt Nam.`;
   } else if (type === "Đề thi") {
-    count = 20; 
+    if (!customCount) count = 20; 
     structurePrompt = `Tạo bộ đề thi ${examPeriod} môn ${subject} lớp ${grade} chuẩn theo cấu trúc của Bộ Giáo dục và Đào tạo Việt Nam. 
-    Chủ đề tập trung: "${topic}".
+    Chủ đề tập trung: "${effectiveTopic}".
     Đề thi phải bao gồm các phần sau:
     - Phần I: Câu hỏi trắc nghiệm nhiều lựa chọn (multiple-choice).
     - Phần II: Câu hỏi trắc nghiệm đúng sai (true-false).
@@ -63,7 +65,7 @@ export const generateQuiz = async (
   const response = await ai.models.generateContent({
     model: models.text,
     contents: `Yêu cầu tạo đề thi:
-    - Chủ đề/Nội dung: "${topic}"
+    - Chủ đề/Nội dung: "${effectiveTopic}"
     - Loại hình: ${type} ${examPeriod ? `(${examPeriod})` : ""}
     - Đối tượng: Lớp ${grade || "tương ứng"}
     - Môn học: ${subject || "tương ứng"}
@@ -72,9 +74,16 @@ export const generateQuiz = async (
     
     ${structurePrompt}
     
-    YÊU CẦU QUAN TRỌNG: 
+    YÊU CẦU QUAN TRỌNG VỀ ĐỊNH DẠNG: 
     1. Trả về kết quả dưới dạng JSON.
-    2. BẮT BUỘC sử dụng định dạng LaTeX cho TẤT CẢ các công thức toán học, vật lý, hóa học (ví dụ: $x^2$, $\\frac{a}{b}$, $\\lim_{x \\to 0}$, $H_2O$, $Fe + O_2 \\to Fe_2O_3$, $v = \\frac{s}{t}$). KHÔNG sử dụng ký tự thường cho công thức.
+    2. Trình bày nội dung NGẮN GỌN, ĐẦY ĐỦ, TRÁNH DÀI DÒNG.
+    3. BẮT BUỘC sử dụng LaTeX cho TẤT CẢ các công thức toán học, vật lý, hóa học. 
+       - Công thức toán: sử dụng $...$ (ví dụ: $x^2 + y^2 = z^2$, $\\frac{a}{b}$).
+       - Ký hiệu hóa học: sử dụng định dạng LaTeX chuẩn trong môi trường toán học $...$. 
+       - Ví dụ hóa học: sử dụng $\\text{H}_2\\text{O}$ thay vì H2O, sử dụng $\\text{Fe} + \\text{O}_2 \\to \\text{Fe}_2\\text{O}_3$. 
+       - KHÔNG sử dụng lệnh \\ce{...} vì hệ thống không hỗ trợ. Hãy dùng \\text{...} cho các ký hiệu nguyên tố và số chỉ số dưới.
+       - Đảm bảo các chỉ số dưới được viết bằng _{...} (ví dụ: $\\text{CO}_2$ là $\\text{CO}_2$).
+       - KHÔNG sử dụng ký tự thường cho các biểu thức khoa học.
     3. Cấu trúc JSON cho mỗi câu hỏi:
        - type: "multiple-choice" | "true-false" | "short-answer" | "essay"
        - question: nội dung câu hỏi (sử dụng LaTeX nếu có công thức)
@@ -122,13 +131,14 @@ export const getQuestionHelp = async (question: string, helpType: 'hint' | 'meth
     model: models.text,
     contents: `Câu hỏi: "${question}"
     Yêu cầu trợ giúp: ${promptMap[helpType]}
+    LƯU Ý: Trả lời NGẮN GỌN, SÚC TÍCH, ĐI THẲNG VÀO VẤN ĐỀ, không dài dòng.
     BẮT BUỘC sử dụng LaTeX cho công thức toán học.`,
   });
 
   return response.text;
 };
 
-export const getExplanationStream = async (concept: string, subject: string = "Chung", imageBase64?: string) => {
+export const getExplanationStream = async (concept: string, imageBase64?: string) => {
   const ai = getAI();
   const parts: any[] = [{ text: concept }];
   
@@ -141,15 +151,36 @@ export const getExplanationStream = async (concept: string, subject: string = "C
     });
   }
 
-  const subjectInstruction = subject !== "Chung" ? `Bạn đang hỗ trợ môn học: ${subject}. Hãy tập trung kiến thức vào môn này.` : "Bạn là một trợ lý học tập đa năng.";
-
   const response = await ai.models.generateContentStream({
     model: models.text,
     contents: { parts },
     config: {
-      systemInstruction: `Bạn là một trợ lý học tập chuyên nghiệp. ${subjectInstruction} Hãy giải thích các khái niệm một cách chi tiết, dễ hiểu, sử dụng ví dụ minh họa. ĐỐI VỚI CÁC CÔNG THỨC TOÁN HỌC, BẮT BUỘC SỬ DỤNG ĐỊNH DẠNG LaTeX (ví dụ: $E=mc^2$). Nếu có hình ảnh, hãy phân tích nội dung hình ảnh để hỗ trợ việc giảng bài.`
+      systemInstruction: `Bạn là một trợ lý học tập chuyên nghiệp và thông minh. Hãy tự động nhận diện môn học và nội dung từ câu hỏi hoặc hình ảnh của người dùng. Hãy giải thích các kiến thức một cách NGẮN GỌN, ĐẦY ĐỦ, DỄ HIỂU, tránh dài dòng nhiều chữ. ĐỐI VỚI CÁC CÔNG THỨC TOÁN HỌC, VẬT LÝ, HÓA HỌC, BẮT BUỘC SỬ DỤNG ĐỊNH DẠNG LaTeX (ví dụ: $E=mc^2$). Nếu có hình ảnh, hãy phân tích kỹ nội dung hình ảnh để đưa ra lời giải chính xác nhất.`
     }
   });
 
   return response;
+};
+
+export const getQuizFeedback = async (quiz: Quiz, userAnswers: any[]) => {
+  const ai = getAI();
+  const performanceData = quiz.questions.map((q, i) => ({
+    question: q.question,
+    isCorrect: String(q.correctAnswer) === String(userAnswers[i]),
+  }));
+
+  const response = await ai.models.generateContent({
+    model: models.text,
+    contents: `Dựa trên kết quả làm bài của học sinh (Danh sách câu hỏi và trạng thái Đúng/Sai):
+    ${JSON.stringify(performanceData)}
+    
+    Hãy đưa ra nhận xét chi tiết về:
+    1. Điểm mạnh của học sinh.
+    2. Những lỗ hổng kiến thức cần bổ sung.
+    3. Lời khuyên cụ thể: cần ôn lại những chương nào, kiến thức nào.
+    
+    Yêu cầu: Trình bày bằng tiếng Việt, ngắn gọn, súc tích, sử dụng Markdown.`,
+  });
+
+  return response.text;
 };
