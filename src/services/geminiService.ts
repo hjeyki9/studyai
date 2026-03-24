@@ -4,13 +4,7 @@ let aiInstance: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!aiInstance) {
-    // CẢNH BÁO: API Key được nhúng trực tiếp theo yêu cầu của người dùng. 
-    // Không nên công khai mã nguồn này để tránh bị lộ Key.
     const apiKey = "AIzaSyBTs0YEPwGBsZXyKr1s_HELK_DmzQtwgWg";
-    
-    if (!apiKey || apiKey === "undefined") {
-      throw new Error("Thiếu GEMINI_API_KEY. Vui lòng thiết lập API Key để sử dụng tính năng AI.");
-    }
     aiInstance = new GoogleGenAI({ apiKey });
   }
   return aiInstance;

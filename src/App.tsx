@@ -182,7 +182,7 @@ export default function App() {
       setIsTimerRunning(true);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Có lỗi xảy ra khi tạo đề thi. Vui lòng kiểm tra lại API Key hoặc kết nối mạng.");
+      setError(err.message || "Có lỗi xảy ra khi tạo đề thi. Vui lòng kiểm tra lại kết nối mạng.");
     } finally {
       setLoading(false);
     }
