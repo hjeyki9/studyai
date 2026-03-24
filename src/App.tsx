@@ -1161,11 +1161,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
-      {!process.env.GEMINI_API_KEY && (
-        <div className="bg-amber-50 border-b border-amber-200 p-2 text-center text-xs font-bold text-amber-800">
-          ⚠️ Thiếu GEMINI_API_KEY. Hãy thiết lập biến môi trường trên Vercel để ứng dụng hoạt động.
-        </div>
-      )}
       {/* Navigation */}
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
