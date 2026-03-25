@@ -4,7 +4,10 @@ let aiInstance: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!aiInstance) {
-    const apiKey = "AIzaSyBTs0YEPwGBsZXyKr1s_HELK_DmzQtwgWg";
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "undefined") {
+      throw new Error("Thiếu GEMINI_API_KEY. Vui lòng thiết lập API Key trong phần cài đặt (Environment Variables) để sử dụng tính năng AI.");
+    }
     aiInstance = new GoogleGenAI({ apiKey });
   }
   return aiInstance;
