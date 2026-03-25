@@ -4,7 +4,7 @@ let aiInstance: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!aiInstance) {
-    const apiKey = "AIzaSyBTs0YEPwGBsZXyKr1s_HELK_DmzQtwgWg";
+    const apiKey = "AIzaSyBLwow44Rw4WojtWv7dbc1jgqfhPrEa2j0";
     aiInstance = new GoogleGenAI({ apiKey });
   }
   return aiInstance;
