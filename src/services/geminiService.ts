@@ -49,8 +49,20 @@ export const generateQuiz = async (
   });
   
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || "Lỗi khi tạo đề thi");
+    let errorMessage = "Lỗi khi tạo đề thi";
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error || errorMessage;
+    } catch (e) {
+      // If not JSON, it might be an HTML error page
+      const text = await response.text();
+      if (text.includes("The page could not be found")) {
+        errorMessage = "Server chưa sẵn sàng hoặc không tìm thấy API. Vui lòng đợi giây lát và thử lại.";
+      } else {
+        errorMessage = `Lỗi hệ thống (${response.status})`;
+      }
+    }
+    throw new Error(errorMessage);
   }
   
   return response.json();
@@ -64,8 +76,14 @@ export const getQuestionHelp = async (question: string, helpType: 'hint' | 'meth
   });
   
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || "Lỗi khi lấy trợ giúp");
+    let errorMessage = "Lỗi khi lấy trợ giúp";
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error || errorMessage;
+    } catch (e) {
+      errorMessage = `Lỗi hệ thống (${response.status})`;
+    }
+    throw new Error(errorMessage);
   }
   
   const data = await response.json();
@@ -105,8 +123,14 @@ export const getQuizFeedback = async (quiz: Quiz, userAnswers: any[]) => {
   });
   
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || "Lỗi khi lấy nhận xét");
+    let errorMessage = "Lỗi khi lấy nhận xét";
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error || errorMessage;
+    } catch (e) {
+      errorMessage = `Lỗi hệ thống (${response.status})`;
+    }
+    throw new Error(errorMessage);
   }
   
   const data = await response.json();
