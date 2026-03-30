@@ -35,15 +35,12 @@ import { jsPDF } from 'jspdf';
 import { Document, Packer, Paragraph, TextRun, AlignmentType } from 'docx';
 import { saveAs } from 'file-saver';
 import { cn } from './utils';
-import { supabase } from './lib/supabase';
 
-type View = 'dashboard' | 'quiz' | 'tutor' | 'history';
+type View = 'dashboard' | 'quiz' | 'tutor';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState<any[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Quiz State
   const [quizTopic, setQuizTopic] = useState('');
@@ -107,63 +104,6 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isTimerRunning, timeLeft]);
 
-  const fetchHistory = async () => {
-    setHistoryLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('history')
-        .select(`
-          *,
-          quizzes (
-            title,
-            content
-          )
-        `)
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      setHistory(data || []);
-    } catch (err) {
-      console.error("Fetch History Error:", err);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
-  const saveToHistory = async (quizId: string, score: number, answers: any[], feedback: string) => {
-    try {
-      const { error } = await supabase
-        .from('history')
-        .insert([
-          { 
-            quiz_id: quizId, 
-            score, 
-            user_answers: answers, 
-            feedback 
-          }
-        ]);
-      if (error) throw error;
-    } catch (err) {
-      console.error("Save History Error:", err);
-    }
-  };
-
-  const saveQuiz = async (quiz: Quiz) => {
-    try {
-      const { data, error } = await supabase
-        .from('quizzes')
-        .insert([
-          { title: quiz.title, content: quiz }
-        ])
-        .select();
-      if (error) throw error;
-      return data[0].id;
-    } catch (err) {
-      console.error("Save Quiz Error:", err);
-      return null;
-    }
-  };
-
   const handleQuizSubmit = async () => {
     if (!generatedQuiz) return;
     
@@ -189,14 +129,7 @@ export default function App() {
     setFeedbackLoading(true);
     try {
       const feedback = await getQuizFeedback(generatedQuiz, userAnswers);
-      const fbText = feedback || "Không có nhận xét.";
-      setQuizFeedback(fbText);
-
-      // Save to Supabase
-      const quizId = await saveQuiz(generatedQuiz);
-      if (quizId) {
-        await saveToHistory(quizId, score, userAnswers, fbText);
-      }
+      setQuizFeedback(feedback || "Không có nhận xét.");
     } catch (err) {
       console.error(err);
       setQuizFeedback("Không thể lấy nhận xét từ AI lúc này.");
@@ -1249,37 +1182,10 @@ export default function App() {
               <span className="text-xl font-display font-bold text-slate-900">EduAI</span>
             </motion.div>
             
-            <div className="hidden md:flex items-center gap-6">
-              <button 
-                onClick={() => setCurrentView('dashboard')}
-                className={cn(
-                  "text-sm font-medium transition-colors",
-                  currentView === 'dashboard' ? "text-emerald-600" : "text-slate-600 hover:text-emerald-500"
-                )}
-              >
-                Trang chủ
-              </button>
-              <button 
-                onClick={() => {
-                  setCurrentView('history');
-                  fetchHistory();
-                }}
-                className={cn(
-                  "text-sm font-medium transition-colors",
-                  currentView === 'history' ? "text-emerald-600" : "text-slate-600 hover:text-emerald-500"
-                )}
-              >
-                Lịch sử
-              </button>
-              <button 
-                onClick={() => setCurrentView('tutor')}
-                className={cn(
-                  "text-sm font-medium transition-colors",
-                  currentView === 'tutor' ? "text-emerald-600" : "text-slate-600 hover:text-emerald-500"
-                )}
-              >
-                Gia sư AI
-              </button>
+            <div className="hidden md:flex items-center gap-8">
+              <div className="px-6 py-2 bg-emerald-50 text-emerald-600 rounded-full text-sm font-black uppercase tracking-[0.2em] border border-emerald-100">
+                Study with AI
+              </div>
             </div>
 
             <div className="flex items-center gap-4">
@@ -1304,94 +1210,9 @@ export default function App() {
             {currentView === 'dashboard' && renderDashboard()}
             {currentView === 'quiz' && renderQuiz()}
             {currentView === 'tutor' && renderTutor()}
-            {currentView === 'history' && renderHistory()}
           </motion.div>
         </AnimatePresence>
       </main>
     </div>
   );
-
-  function renderHistory() {
-    return (
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Lịch sử luyện tập</h1>
-            <p className="text-slate-500 mt-1">Xem lại các bài thi và kết quả của bạn</p>
-          </div>
-          <button
-            onClick={() => setCurrentView('dashboard')}
-            className="flex items-center gap-2 text-emerald-600 font-medium hover:text-emerald-700 cursor-pointer"
-          >
-            <ArrowLeft size={20} />
-            Quay lại
-          </button>
-        </div>
-
-        {historyLoading ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Loader2 className="animate-spin text-emerald-500 mb-4" size={40} />
-            <p className="text-slate-500">Đang tải lịch sử...</p>
-          </div>
-        ) : history.length === 0 ? (
-          <div className="bg-white rounded-3xl p-12 text-center border border-slate-100 shadow-sm">
-            <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300 mx-auto mb-4">
-              <FileText size={32} />
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900">Chưa có lịch sử</h3>
-            <p className="text-slate-500 mt-2">Hãy bắt đầu luyện tập để theo dõi tiến độ của bạn.</p>
-            <button
-              onClick={() => setCurrentView('dashboard')}
-              className="mt-6 bg-emerald-500 text-white px-6 py-2 rounded-xl font-medium hover:bg-emerald-600 transition-colors cursor-pointer"
-            >
-              Luyện tập ngay
-            </button>
-          </div>
-        ) : (
-          <div className="grid gap-4">
-            {history.map((item) => (
-              <motion.div
-                key={item.id}
-                whileHover={{ y: -2 }}
-                className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center justify-between group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
-                    <Trophy size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-900 group-hover:text-emerald-600 transition-colors">
-                      {item.quizzes?.title || "Bài thi không tên"}
-                    </h3>
-                    <p className="text-sm text-slate-500">
-                      {new Date(item.created_at).toLocaleDateString('vi-VN')} • {new Date(item.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-emerald-600">{item.score}/10</p>
-                    <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Điểm số</p>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setGeneratedQuiz(item.quizzes.content);
-                      setUserAnswers(item.user_answers);
-                      setQuizSubmitted(true);
-                      setQuizScore(item.score);
-                      setQuizFeedback(item.feedback);
-                      setCurrentView('quiz');
-                    }}
-                    className="p-2 bg-slate-50 text-slate-400 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-colors cursor-pointer"
-                  >
-                    <ChevronRight size={24} />
-                  </button>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
 }

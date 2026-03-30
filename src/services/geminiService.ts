@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 let aiInstance: GoogleGenAI | null = null;
 
@@ -43,7 +43,6 @@ export const generateQuiz = async (
   customCount?: number
 ): Promise<Quiz> => {
   const ai = getAI();
-  
   let count = customCount || 10;
   let structurePrompt = "";
   const effectiveTopic = topic || `Kiến thức tổng hợp môn ${subject} lớp ${grade}${examPeriod ? ` (${examPeriod})` : ""}`;
@@ -122,7 +121,7 @@ export const generateQuiz = async (
 
 export const getQuestionHelp = async (question: string, helpType: 'hint' | 'method' | 'solution') => {
   const ai = getAI();
-  const promptMap: any = {
+  const promptMap = {
     hint: "Hãy đưa ra một gợi ý nhỏ để học sinh có thể tự suy nghĩ tiếp, không giải trực tiếp.",
     method: "Hãy hướng dẫn phương pháp giải, các bước tư duy cần thiết cho câu hỏi này.",
     solution: "Hãy trình bày lời giải chi tiết và đầy đủ cho câu hỏi này."
@@ -165,7 +164,7 @@ export const getExplanationStream = async (concept: string, imageBase64?: string
 
 export const getQuizFeedback = async (quiz: Quiz, userAnswers: any[]) => {
   const ai = getAI();
-  const performanceData = quiz.questions.map((q: any, i: number) => ({
+  const performanceData = quiz.questions.map((q, i) => ({
     question: q.question,
     isCorrect: String(q.correctAnswer) === String(userAnswers[i]),
   }));
