@@ -1,15 +1,40 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { supabase } from "../lib/supabase";
 
 let aiInstance: GoogleGenAI | null = null;
+let cachedApiKey: string | null = null;
 
-const getAI = () => {
-  if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === "undefined") {
-      throw new Error("Thiếu GEMINI_API_KEY. Vui lòng thiết lập API Key trong phần cài đặt (Environment Variables) để sử dụng tính năng AI.");
+const getAI = async () => {
+  if (aiInstance) return aiInstance;
+
+  // Try to fetch from Supabase first
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'GEMINI_API_KEY')
+        .single();
+
+      if (!error && data?.value) {
+        cachedApiKey = data.value;
+      }
     }
-    aiInstance = new GoogleGenAI({ apiKey });
+    
+    if (!cachedApiKey) {
+      // Fallback to environment variable if not found in Supabase or Supabase not configured
+      cachedApiKey = process.env.GEMINI_API_KEY || null;
+    }
+  } catch (err) {
+    console.error("Error fetching API key from Supabase:", err);
+    cachedApiKey = process.env.GEMINI_API_KEY || null;
   }
+
+  if (!cachedApiKey || cachedApiKey === "undefined") {
+    throw new Error("Thiếu GEMINI_API_KEY. Vui lòng thiết lập API Key trong Supabase (bảng app_config) hoặc Environment Variables để sử dụng tính năng AI.");
+  }
+
+  aiInstance = new GoogleGenAI({ apiKey: cachedApiKey });
   return aiInstance;
 };
 
@@ -42,7 +67,7 @@ export const generateQuiz = async (
   examPeriod?: string,
   customCount?: number
 ): Promise<Quiz> => {
-  const ai = getAI();
+  const ai = await getAI();
   let count = customCount || 10;
   let structurePrompt = "";
   const effectiveTopic = topic || `Kiến thức tổng hợp môn ${subject} lớp ${grade}${examPeriod ? ` (${examPeriod})` : ""}`;
@@ -120,7 +145,7 @@ export const generateQuiz = async (
 };
 
 export const getQuestionHelp = async (question: string, helpType: 'hint' | 'method' | 'solution') => {
-  const ai = getAI();
+  const ai = await getAI();
   const promptMap = {
     hint: "Hãy đưa ra một gợi ý nhỏ để học sinh có thể tự suy nghĩ tiếp, không giải trực tiếp.",
     method: "Hãy hướng dẫn phương pháp giải, các bước tư duy cần thiết cho câu hỏi này.",
@@ -139,7 +164,7 @@ export const getQuestionHelp = async (question: string, helpType: 'hint' | 'meth
 };
 
 export const getExplanationStream = async (concept: string, imageBase64?: string) => {
-  const ai = getAI();
+  const ai = await getAI();
   const parts: any[] = [{ text: concept }];
   
   if (imageBase64) {
@@ -163,7 +188,7 @@ export const getExplanationStream = async (concept: string, imageBase64?: string
 };
 
 export const getQuizFeedback = async (quiz: Quiz, userAnswers: any[]) => {
-  const ai = getAI();
+  const ai = await getAI();
   const performanceData = quiz.questions.map((q, i) => ({
     question: q.question,
     isCorrect: String(q.correctAnswer) === String(userAnswers[i]),
